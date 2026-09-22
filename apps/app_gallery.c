@@ -531,7 +531,7 @@ static int grid_event(const UiEvent *e)
         total += 16;
         int x = (SCREEN_W - total) / 2;
         for (int i = 0; i < 3; i++) {
-            if (ui_hit(e->x, e->y, x, TAB_Y, widths[i], TAB_H)) {
+            if (ui_hit_pad(e->x, e->y, x, TAB_Y, widths[i], TAB_H, 6)) {
                 if (filter != vals[i]) {
                     filter = vals[i];
                     page = 0;
@@ -598,11 +598,11 @@ static int view_event(const UiEvent *e)
         /* 工具条按钮 */
         if (!immersive) {
             if (ui_topbar_back_hit(e->x, e->y)) { mode = GAL_GRID; video_close(); view_unload(); page_slide = 0; return 0; }
-            if (ui_hit(e->x, e->y, SCREEN_W - 58, 8, 48, 48)) { del_confirm = 1; return 0; }
+            if (ui_hit_pad(e->x, e->y, SCREEN_W - 58, 8, 48, 48, 4)) { del_confirm = 1; return 0; }
         }
         /* 视频播放控制 */
         if (it && it->type == MEDIA_VIDEO) {
-            if (ui_hit(e->x, e->y, 16, SCREEN_H - 68, 52, 52)) {
+            if (ui_hit_pad(e->x, e->y, 16, SCREEN_H - 68, 52, 52, 4)) {
                 vr_playing = !vr_playing;
                 vr_t0 = now_ms();
                 immersive = 0;
@@ -619,8 +619,8 @@ static int view_event(const UiEvent *e)
             }
         }
         /* 左右箭头 */
-        if (view_idx > 0 && ui_hit(e->x, e->y, 0, SCREEN_H / 2 - 30, 52, 60)) { view_step(-1); return 0; }
-        if (view_idx < fn - 1 && ui_hit(e->x, e->y, SCREEN_W - 52, SCREEN_H / 2 - 30, 52, 60)) { view_step(1); return 0; }
+        if (view_idx > 0 && ui_hit_pad(e->x, e->y, 0, SCREEN_H / 2 - 30, 52, 60, 6)) { view_step(-1); return 0; }
+        if (view_idx < fn - 1 && ui_hit_pad(e->x, e->y, SCREEN_W - 52, SCREEN_H / 2 - 30, 52, 60, 6)) { view_step(1); return 0; }
         /* 轻触切换工具条（点击图片中间区域） */
         if (e->y > 70 && e->y < SCREEN_H - 90) {
             immersive = !immersive;

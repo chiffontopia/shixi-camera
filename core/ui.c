@@ -427,7 +427,8 @@ void ui_topbar(Surface *s, const char *title, const char *subtitle, int show_bac
 
 int ui_topbar_back_hit(int x, int y)
 {
-    return ui_hit(x, y, 8, 8, 48, UI_TOPBAR_H - 16);
+    /* 返回键画的是半径 19 的圆，这里再外扩 6px 容差 */
+    return ui_hit_pad(x, y, 8, 8, 48, UI_TOPBAR_H - 16, 6);
 }
 
 void ui_button(Surface *s, int x, int y, int w, int h, const char *label,
@@ -525,13 +526,13 @@ void ui_dialog(Surface *s, const char *title, const char *msg,
 int ui_dialog_ok_hit(int x, int y)
 {
     int by = DLG_Y + DLG_H - DLG_BTN_H - 24;
-    return ui_hit(x, y, DLG_X + DLG_W - 36 - DLG_BTN_W, by, DLG_BTN_W, DLG_BTN_H);
+    return ui_hit_pad(x, y, DLG_X + DLG_W - 36 - DLG_BTN_W, by, DLG_BTN_W, DLG_BTN_H, 6);
 }
 
 int ui_dialog_cancel_hit(int x, int y)
 {
     int by = DLG_Y + DLG_H - DLG_BTN_H - 24;
-    return ui_hit(x, y, DLG_X + 36, by, DLG_BTN_W, DLG_BTN_H);
+    return ui_hit_pad(x, y, DLG_X + 36, by, DLG_BTN_W, DLG_BTN_H, 6);
 }
 
 /* ---------- Toast ---------- */

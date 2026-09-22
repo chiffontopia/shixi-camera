@@ -471,7 +471,7 @@ static int app_brick_event(const UiEvent *e)
         touch_down = 0;
         if (!e->tap) return 0;
         if (ui_topbar_back_hit(e->x, e->y)) return 1;    /* 返回 = 放弃本局（leave 落盘） */
-        if (ui_hit(e->x, e->y, HUD_BTN_X, HUD_BTN_Y, HUD_BTN_W, HUD_BTN_H)) {
+        if (ui_hit_pad(e->x, e->y, HUD_BTN_X, HUD_BTN_Y, HUD_BTN_W, HUD_BTN_H, 6)) {
             if (state == ST_RUNNING) { state = ST_PAUSED; touch_down = 0; }
             else if (state == ST_PAUSED) { state = ST_RUNNING; acc_ms = 0; }
             return 0;

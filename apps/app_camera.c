@@ -308,7 +308,7 @@ int app_camera_event(const UiEvent *e)
             if (ui_topbar_back_hit(e->x, e->y) || ui_hit(e->x, e->y, 8, 8, 48, 52))
                 return 1;
             /* 左下角缩略图 -> 图库 */
-            if (ui_hit(e->x, e->y, THUMB_X - 8, THUMB_Y - 8, THUMB_SIZE + 16, THUMB_SIZE + 30)) {
+            if (ui_hit_pad(e->x, e->y, THUMB_X - 8, THUMB_Y - 8, THUMB_SIZE + 16, THUMB_SIZE + 30, 8)) {
                 app_open(APP_GALLERY);
                 return 0;
             }

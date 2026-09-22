@@ -643,7 +643,7 @@ static int topbar_hit(const UiEvent *e)
 {
   int cw = ui_pill_width("清空");
   int cx0 = SCREEN_W - 14 - cw;
-  if (ui_hit(e->x, e->y, cx0, 15, cw, 28))
+  if (ui_hit_pad(e->x, e->y, cx0, 15, cw, 28, 8))
   {
     if (waiting)
     {
@@ -661,7 +661,7 @@ static int topbar_hit(const UiEvent *e)
   if (show_retry && last_user[0])
   {
     int rw = ui_pill_width("重试");
-    if (ui_hit(e->x, e->y, cx0 - 10 - rw, 15, rw, 28))
+    if (ui_hit_pad(e->x, e->y, cx0 - 10 - rw, 15, rw, 28, 8))
     {
       retry_last();
       return 1;
@@ -791,7 +791,7 @@ static int kb_hit(const UiEvent *e)
   if (!kb_pick(e->x, e->y, &r, &c))
   {
     /* 键盘上方输入预览条上的发送键 */
-    if (draft[0] && ui_hit(e->x, e->y, SCREEN_W - 62, KB_TOP - 45, 40, 36))
+    if (draft[0] && ui_hit_pad(e->x, e->y, SCREEN_W - 62, KB_TOP - 45, 40, 36, 8))
     {
       send_or_cancel();
       return 1;
@@ -950,19 +950,19 @@ int app_chat_event(const UiEvent *e)
     if (topbar_hit(e))
       return 0; /* 同上：处理完留在聊天界面 */
 
-    /* 输入框 -> 打开键盘 */
+    /*
+     * 输入栏：只要点在整条栏里就算"点输入框"（以前要求精确点进那个 36px 高的
+     * 小圆角框，边缘 10px 和两侧留白点了都没反应 —— 手指根本对不准）。
+     * 发送键优先判定。
+     */
     if (e->y >= SCREEN_H - INPUT_H)
     {
-      if (ui_hit(e->x, e->y, 16, SCREEN_H - INPUT_H + 10, SCREEN_W - 108, INPUT_H - 20))
-      {
-        kb_open = 1;
-        return 0;
-      }
-      if (ui_hit(e->x, e->y, SCREEN_W - 76, SCREEN_H - INPUT_H + 4, 56, 48))
+      if (ui_hit_pad(e->x, e->y, SCREEN_W - 84, SCREEN_H - INPUT_H, 72, INPUT_H, 6))
       {
         send_or_cancel();
         return 0;
       }
+      kb_open = 1;
       return 0;
     }
     /* 快捷话题 */
@@ -973,7 +973,7 @@ int app_chat_event(const UiEvent *e)
       for (int i = 0; i < 3; i++)
       {
         int w = ui_pill_width(chips[i]);
-        if (ui_hit(e->x, e->y, x, SCREEN_H - INPUT_H - 38, w, 30))
+        if (ui_hit_pad(e->x, e->y, x, SCREEN_H - INPUT_H - 38, w, 30, 8))
         {
           snprintf(draft, sizeof(draft), "%s", chips[i]);
           send_or_cancel();

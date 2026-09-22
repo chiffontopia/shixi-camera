@@ -16,6 +16,16 @@ static inline int ui_hit(int x, int y, int rx, int ry, int rw, int rh)
     return x >= rx && x < rx + rw && y >= ry && y < ry + rh;
 }
 
+/*
+ * 带容差的命中：目标外扩 pad 像素。
+ * 7 寸 800x480 上 1px≈0.19mm，手指落点误差常有 1~2mm（5~10px），
+ * 所以小于 ~9mm（约 48px）的目标都该留余量，否则"看着点到了却没反应"。
+ */
+static inline int ui_hit_pad(int x, int y, int rx, int ry, int rw, int rh, int pad)
+{
+    return ui_hit(x, y, rx - pad, ry - pad, rw + pad * 2, rh + pad * 2);
+}
+
 /* ---------------- 图标 ---------------- */
 typedef enum {
     IC_BACK = 0, IC_TRASH, IC_PLAY, IC_PAUSE, IC_SEND, IC_CHECK, IC_CLOSE,

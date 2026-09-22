@@ -344,7 +344,7 @@ int app_video_event(const UiEvent *e)
             if (recording) stop_recording();
             return 1;
         }
-        if (ui_hit(e->x, e->y, THUMB_X - 8, THUMB_Y - 8, THUMB_SIZE + 16, THUMB_SIZE + 30)) {
+        if (ui_hit_pad(e->x, e->y, THUMB_X - 8, THUMB_Y - 8, THUMB_SIZE + 16, THUMB_SIZE + 30, 8)) {
             app_open(APP_GALLERY);
             return 0;
         }
