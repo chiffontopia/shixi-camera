@@ -153,6 +153,19 @@ static void serve(void)
             }
             emit(EV_KEY, BTN_TOUCH, 0); syn();
             printf("drift %d %d -> %d %d（%dms）\n", a, b, a + dx, b + dy, total);
+        } else if (cnt >= 3 && !strcmp(what, "tap1p")) {
+            /*
+             * 真实电容屏最常见的报法：坐标 + BTN_TOUCH 在**同一个事件包**里
+             * （一个 SYN 之内，坐标排在前面），抬起在下一个包。
+             * 输入层若在按下时清掉"本包有坐标"的标志，这种点击会整个丢失。
+             */
+            int rx = a * 1024 / 800, ry = b * 600 / 480;
+            emit(EV_ABS, ABS_X, rx); emit(EV_ABS, ABS_Y, ry);
+            emit(EV_KEY, BTN_TOUCH, 1); syn();
+            usleep(70000);
+            emit(EV_ABS, ABS_X, rx); emit(EV_ABS, ABS_Y, ry);
+            emit(EV_KEY, BTN_TOUCH, 0); syn();
+            printf("tap1p %d %d（坐标与按下同包）\n", a, b);
         } else if (cnt >= 3 && !strcmp(what, "tapafter")) {
             /* 模拟"坐标排在 BTN_TOUCH 之后"的面板：先报按下，再报坐标。
              * 用来验证输入层是否会用到上一次的旧坐标（旧实现就会点错地方）。 */

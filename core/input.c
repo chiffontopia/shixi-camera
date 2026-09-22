@@ -40,7 +40,8 @@ static int   swap_xy = 0, invert_x = 0, invert_y = 0;
 /* 手势状态 */
 static int   down = 0;
 static int   pending_down = 0;      /* 等坐标到齐再上报 DOWN（避免用上一次的旧坐标） */
-static int   coords_seen = 0;       /* 本次触摸是否已经收到过坐标 */
+static int   coords_pkt = 0;        /* **当前事件包**里出现过坐标 */
+static int   down_emitted = 0;      /* 本次触摸的 DOWN 是否已经发出去 */
 static int   last_mx = -1, last_my = -1;  /* 上次上报 MOVE 的位置（去重用） */
 static int   touch_debug = 0;       /* SHIXI_TOUCH_DEBUG=1 打印每次手势的判定依据 */
 static int   cx, cy, sx, sy;
@@ -270,9 +271,9 @@ int input_poll(UiEvent *out, int timeout_ms)
     struct pollfd p = { fd, POLLIN, 0 };
     int pr = poll(&p, 1, timeout_ms);
     if (pr <= 0) {
-        /* 兜底：个别驱动按下包不带 SYN，或坐标迟迟不来；60ms 后只要有坐标就发 */
-        if (down && pending_down && coords_seen && now_ms() - down_ms >= 60) {
-            pending_down = 0;
+        /* 兜底：个别驱动按下包不带 SYN；60ms 后还不发就用手上的坐标发出去 */
+        if (down && pending_down && now_ms() - down_ms >= 60) {
+            pending_down = 0; down_emitted = 1; coords_pkt = 0;
             sx = cx; sy = cy;
             out->type = UI_EV_DOWN; out->x = cx; out->y = cy;
             out->x0 = sx; out->y0 = sy; out->dur_ms = 0;
@@ -295,7 +296,7 @@ int input_poll(UiEvent *out, int timeout_ms)
         ssize_t n = read(fd, &ev, sizeof(ev));
         if (n != (ssize_t)sizeof(ev)) break;
         if (ev.type == EV_ABS) {
-            if (ev.code == ABS_X || ev.code == ABS_Y) coords_seen = 1;
+            if (ev.code == ABS_X || ev.code == ABS_Y) coords_pkt = 1;
             if (ev.code == ABS_X) {
                 int v = map_x(ev.value);
                 if (swap_xy) cy = map_y(ev.value); else cx = v;
@@ -306,17 +307,23 @@ int input_poll(UiEvent *out, int timeout_ms)
         } else if (ev.type == EV_KEY && ev.code == BTN_TOUCH) {
             if (ev.value) {
                 /*
-                 * 只登记，不立刻上报 DOWN：gslX680 这类的按下包里坐标可能排在
-                 * BTN_TOUCH 之后，立刻上报会用到上一次触摸的旧坐标，
-                 * 上层按旧坐标做命中判定 -> 点哪都没反应。等这个包的 EV_SYN 再发，
-                 * 那时 cx/cy 一定是本次触摸的坐标。
+                 * 只登记，不立刻上报 DOWN：等这个包的 EV_SYN 再发，那时 cx/cy
+                 * 一定是本次触摸的坐标。
+                 * 关键：**不要清 coords_pkt** —— gslX680 的按下包里坐标就排在
+                 * BTN_TOUCH 前面（同一个包），清掉会导致 DOWN 永远发不出去：
+                 * 普通点击被丢掉，而手指拖动后补发的 DOWN 会把一次滑动当成点击。
                  */
-                down = 1; pending_down = 1; coords_seen = 0;
+                down = 1; pending_down = 1; down_emitted = 0;
                 moved = 0; long_fired = 0;
                 down_ms = now_ms();
                 last_mx = last_my = -1;
             } else if (down) {
                 down = 0;
+                if (pending_down && !down_emitted) {
+                    /* 整个触摸都没等到坐标（极罕见）：把抬起位置当按下位置，
+                     * 算一次点击，绝不要让 sx/sy 停留在上一次触摸的旧值上 */
+                    sx = cx; sy = cy;
+                }
                 pending_down = 0;
                 if (touch_debug)
                     fprintf(stderr, "touch: 抬起 (%d,%d) 原始范围 X:%d..%d Y:%d..%d\n",
@@ -325,9 +332,9 @@ int input_poll(UiEvent *out, int timeout_ms)
                 return 1;
             }
         } else if (ev.type == EV_SYN) {
-            if (down && pending_down && coords_seen) {
+            if (down && pending_down && coords_pkt) {
                 /* 本次触摸的坐标已到齐，正式上报按下 */
-                pending_down = 0;
+                pending_down = 0; down_emitted = 1; coords_pkt = 0;
                 sx = cx; sy = cy;
                 if (touch_debug) fprintf(stderr, "touch: 按下 (%d,%d)\n", cx, cy);
                 out->type = UI_EV_DOWN; out->x = cx; out->y = cy;
@@ -342,6 +349,7 @@ int input_poll(UiEvent *out, int timeout_ms)
                 /* 只有真的移动了才上报，且相邻两次位置要有变化（防抖动刷屏） */
                 if (moved > MOVE_EMIT_MIN &&
                     (last_mx < 0 || abs(cx - last_mx) >= 2 || abs(cy - last_my) >= 2)) {
+                    coords_pkt = 0;      /* 本包已消费 */
                     last_mx = cx; last_my = cy;
                     out->type = UI_EV_MOVE; out->x = cx; out->y = cy;
                     out->x0 = sx; out->y0 = sy;
@@ -350,6 +358,7 @@ int input_poll(UiEvent *out, int timeout_ms)
                     return 1;
                 }
             }
+            coords_pkt = 0;      /* 包边界：本包坐标不作数到下一个包 */
         }
     }
     return 0;
