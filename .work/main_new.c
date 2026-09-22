@@ -173,28 +173,14 @@ static int launcher_event(const UiEvent *e)
     if (e->type == UI_EV_UP) {
         int idx = press_icon;
         press_icon = -1;
-        /*
-         * 兜底：按下状态可能被 MOVE 取消了（手指滑出去一点），
-         * 但手势本身是点击 -> 用"按下位置"再判一次。
-         * 手指按下时滑 20~70px 很常见，不该因此点不动图标。
-         */
-        if (idx < 0 && e->tap) {
-            for (int i = 0; i < APP_COUNT; i++) {
-                if (ui_hit(e->x0, e->y0, icon_x(i), icon_y(i), icon_size, icon_size + 34)) {
-                    idx = i;
-                    break;
-                }
-            }
-        }
         if (idx >= 0 && e->tap) {
             app_open(idx);
         }
         return 0;
     }
     if (e->type == UI_EV_MOVE) {
-        /* 只有明显滑开（图标外 60px 以上）才取消按下状态，避免抖动取消点击 */
-        if (press_icon >= 0 && !ui_hit(e->x, e->y, icon_x(press_icon) - 60, icon_y(press_icon) - 60,
-                                       icon_size + 120, icon_size + 140))
+        if (press_icon >= 0 && !ui_hit(e->x, e->y, icon_x(press_icon), icon_y(press_icon) - 20,
+                                       icon_size, icon_size + 64))
             press_icon = -1;
         return 0;
     }

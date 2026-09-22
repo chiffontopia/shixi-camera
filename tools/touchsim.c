@@ -122,6 +122,46 @@ static void serve(void)
             }
             emit(EV_KEY, BTN_TOUCH, 0); syn();
             printf("swipe %d %d -> %d %d\n", a, b, c, d);
+        } else if (cnt >= 3 && (!strcmp(what, "jit") || !strcmp(what, "slow"))) {
+            int slow = !strcmp(what, "slow");
+            int steps = slow ? 18 : 6, wait_ms = slow ? 50 : 40, jit = slow ? 9 : 7;
+            move_to(a, b);
+            emit(EV_KEY, BTN_TOUCH, 1); syn();
+            for (int i = 1; i <= steps; i++) {
+                int dx = ((i * 37) % (2 * jit + 1)) - jit;
+                int dy = ((i * 53) % (2 * jit + 1)) - jit;
+                move_to(a + dx, b + dy);
+                usleep(wait_ms * 1000);
+            }
+            move_to(a, b + 1);
+            emit(EV_KEY, BTN_TOUCH, 0); syn();
+            printf("%s %d %d\n", slow ? "slow" : "jit", a, b);
+        } else if (cnt >= 3 && !strcmp(what, "drift")) {
+            /* drift X Y DX DY [ms]：按住期间从 (X,Y) 单调漂到 (X+DX,Y+DY) 再抬起 */
+            int dx = cnt >= 5 ? c : 70;              /* 屏幕像素 */
+            int dy = cnt >= 6 ? d : 10;
+            int total = 300, steps = 6;
+            int sx_ = a * 1024 / 800, sy_ = b * 600 / 480;
+            int ex_ = (a + dx) * 1024 / 800, ey_ = (b + dy) * 600 / 480;
+            emit(EV_ABS, ABS_X, sx_); emit(EV_ABS, ABS_Y, sy_); syn();
+            emit(EV_KEY, BTN_TOUCH, 1); syn();
+            for (int i = 1; i <= steps; i++) {
+                emit(EV_ABS, ABS_X, sx_ + (ex_ - sx_) * i / steps);
+                emit(EV_ABS, ABS_Y, sy_ + (ey_ - sy_) * i / steps);
+                syn();
+                usleep(total / steps * 1000);
+            }
+            emit(EV_KEY, BTN_TOUCH, 0); syn();
+            printf("drift %d %d -> %d %d（%dms）\n", a, b, a + dx, b + dy, total);
+        } else if (cnt >= 3 && !strcmp(what, "tapafter")) {
+            /* 模拟"坐标排在 BTN_TOUCH 之后"的面板：先报按下，再报坐标。
+             * 用来验证输入层是否会用到上一次的旧坐标（旧实现就会点错地方）。 */
+            emit(EV_KEY, BTN_TOUCH, 1); syn();
+            usleep(15000);
+            move_to(a, b);
+            usleep(60000);
+            emit(EV_KEY, BTN_TOUCH, 0); syn();
+            printf("tapafter %d %d（坐标后到）\n", a, b);
         } else if (cnt >= 3 && !strcmp(what, "down")) {
             move_to(a, b);
             emit(EV_KEY, BTN_TOUCH, 1); syn();
@@ -174,6 +214,33 @@ int main(int argc, char **argv)
         }
         emit(EV_KEY, BTN_TOUCH, 0); syn();
         printf("swipe %d %d -> %d %d\n", x0, y0, x1, y1);
+    } else if ((!strcmp(cmd, "jit") || !strcmp(cmd, "slow")) && argc >= 4) {
+        /* 可选参数：jit X Y [抖动幅度(原始值)] [总时长ms] */
+        /*
+         * 模拟真手指：按下时不稳、坐标一直在抖。
+         *   jit  X Y  快速点一下（约 250ms，水平漂移 ~60 原始值）
+         *   slow X Y  慢慢按（约 900ms，漂移更大）
+         * 用来验证"电容屏抖动导致点击被误判成滑动"这类问题。
+         */
+        int x = atoi(argv[2]), y = atoi(argv[3]);
+        int slow = !strcmp(cmd, "slow");
+        int jit = argc > 4 ? atoi(argv[4]) : (slow ? 60 : 70);   /* 原始坐标抖动幅度 */
+        int total = argc > 5 ? atoi(argv[5]) : (slow ? 900 : 300);
+        int steps = slow ? 18 : 6;
+        int wait_ms = total / steps;
+        move_to(x, y);
+        emit(EV_KEY, BTN_TOUCH, 1); syn();
+        for (int i = 1; i <= steps; i++) {
+            /* 抖动：交替偏一点，最后回到原点附近（真手指就是这样） */
+            int dx = ((i * 37) % (2 * jit + 1)) - jit;
+            int dy = ((i * 53) % (2 * jit + 1)) - jit;
+            move_to(x + dx, y + dy);
+            usleep(wait_ms * 1000);
+        }
+        move_to(x, y + 1);
+        emit(EV_KEY, BTN_TOUCH, 0); syn();
+        printf("%s %d %d（%d 步，抖动 ±%d 原始值，共约 %d ms）\n",
+               slow ? "慢按" : "带抖动点击", x, y, steps, jit, steps * wait_ms);
     } else if (!strcmp(cmd, "key") && argc >= 4) {
         move_to(atoi(argv[2]), atoi(argv[3]));
         emit(EV_KEY, BTN_TOUCH, 1); syn();

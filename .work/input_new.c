@@ -40,7 +40,6 @@ static int   swap_xy = 0, invert_x = 0, invert_y = 0;
 /* 手势状态 */
 static int   down = 0;
 static int   pending_down = 0;      /* 等坐标到齐再上报 DOWN（避免用上一次的旧坐标） */
-static int   coords_seen = 0;       /* 本次触摸是否已经收到过坐标 */
 static int   last_mx = -1, last_my = -1;  /* 上次上报 MOVE 的位置（去重用） */
 static int   touch_debug = 0;       /* SHIXI_TOUCH_DEBUG=1 打印每次手势的判定依据 */
 static int   cx, cy, sx, sy;
@@ -230,12 +229,6 @@ static void fill_up(UiEvent *e, int x, int y, int dur)
         e->tap = 1;                       /* 按太久但没怎么动：仍然当点击处理 */
     }
     e->x0 = sx; e->y0 = sy;
-    /*
-     * 点击：坐标一律回报"手指落下的位置"。
-     * 真手指按下去常会滑 20~70px（电容屏还会抖），抬起位置可能已经滑出按钮，
-     * 上层若按抬起位置做命中判定就会"点不动"。滑动/拖动仍然用当前位置。
-     */
-    if (e->tap) { e->x = sx; e->y = sy; }
     if (touch_debug)
         fprintf(stderr, "touch: 手势 起点(%d,%d) 终点(%d,%d) 位移(%d,%d) 时长%dms -> %s\n",
                 e->x0, e->y0, e->x, e->y, adx, ady, dur,
@@ -270,8 +263,8 @@ int input_poll(UiEvent *out, int timeout_ms)
     struct pollfd p = { fd, POLLIN, 0 };
     int pr = poll(&p, 1, timeout_ms);
     if (pr <= 0) {
-        /* 兜底：个别驱动按下包不带 SYN，或坐标迟迟不来；60ms 后只要有坐标就发 */
-        if (down && pending_down && coords_seen && now_ms() - down_ms >= 60) {
+        /* 兜底：按下包若没等到 SYN（个别驱动），15ms 后也把 DOWN 发出去 */
+        if (down && pending_down && now_ms() - down_ms >= 15) {
             pending_down = 0;
             sx = cx; sy = cy;
             out->type = UI_EV_DOWN; out->x = cx; out->y = cy;
@@ -295,7 +288,6 @@ int input_poll(UiEvent *out, int timeout_ms)
         ssize_t n = read(fd, &ev, sizeof(ev));
         if (n != (ssize_t)sizeof(ev)) break;
         if (ev.type == EV_ABS) {
-            if (ev.code == ABS_X || ev.code == ABS_Y) coords_seen = 1;
             if (ev.code == ABS_X) {
                 int v = map_x(ev.value);
                 if (swap_xy) cy = map_y(ev.value); else cx = v;
@@ -311,8 +303,7 @@ int input_poll(UiEvent *out, int timeout_ms)
                  * 上层按旧坐标做命中判定 -> 点哪都没反应。等这个包的 EV_SYN 再发，
                  * 那时 cx/cy 一定是本次触摸的坐标。
                  */
-                down = 1; pending_down = 1; coords_seen = 0;
-                moved = 0; long_fired = 0;
+                down = 1; pending_down = 1; moved = 0; long_fired = 0;
                 down_ms = now_ms();
                 last_mx = last_my = -1;
             } else if (down) {
@@ -325,8 +316,8 @@ int input_poll(UiEvent *out, int timeout_ms)
                 return 1;
             }
         } else if (ev.type == EV_SYN) {
-            if (down && pending_down && coords_seen) {
-                /* 本次触摸的坐标已到齐，正式上报按下 */
+            if (down && pending_down) {
+                /* 坐标已到齐，正式上报按下 */
                 pending_down = 0;
                 sx = cx; sy = cy;
                 if (touch_debug) fprintf(stderr, "touch: 按下 (%d,%d)\n", cx, cy);
