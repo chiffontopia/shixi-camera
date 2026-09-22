@@ -1,0 +1,20 @@
+# AI 助手配置示例 —— 复制成 $SHIXI_ROOT/ai.conf 后按需修改
+# （本文件不含任何密钥；真实密钥请放在 tools/ai_secret.conf，那个文件已被 .gitignore）
+
+# 模型名（跟着宿主机 relay / 云端接口走）
+model=deepseek/deepseek-v4.1-flash
+
+# 单次回复的 token 上限。注意：这是**推理模型**，额度会先被"思考"吃掉，
+# 设太小会出现"只有思考、没有正文"（界面上会提示被 max_tokens 截断）
+max_tokens=800
+
+# 请求超时（秒）
+timeout=20
+
+# 带进上下文的最近轮数
+history=3
+
+# 可选：自定义传输命令。
+#   留空/不写 = 板端静态 curl 直连 $SHIXI_ROOT/relay_url（正常情况用这个）
+#   板子连不到宿主机时（防火墙挡入站等），改成走桥接：
+# transport=/root/shixi/ai_bridge_board.sh

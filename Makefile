@@ -77,15 +77,27 @@ run:
 
 # 板端调试小工具（截屏 / 虚拟触摸）
 tools:
+	@mkdir -p bin
 	$(CC_BOARD) -static -O2 -o bin/fbshot tools/fbshot.c
 	$(CC_BOARD) -static -O2 -o bin/touchsim tools/touchsim.c
 	$(CC_BOARD) -static -O2 -I core -o bin/camtest tools/camtest.c
 	$(CC_BOARD) $(BOARD_CFLAGS) -o bin/jpgbench tools/jpgbench.c core/gfx.c core/image.c third_party/stb_impl.c $(BOARD_LDFLAGS)
-	@echo "==> bin/fbshot  bin/touchsim  bin/camtest  bin/jpgbench"
+	$(CC_BOARD) $(BOARD_CFLAGS) -o bin/aitest tools/aitest.c core/ai.c core/media.c core/image.c core/avi.c core/gfx.c third_party/stb_impl.c $(BOARD_LDFLAGS)
+	@echo "==> bin/fbshot  bin/touchsim  bin/camtest  bin/jpgbench  bin/aitest"
 
 # 静态 curl（AI 助手连宿主机用）→ bin/curl-arm；需要联网，见 tools/build_curl_arm.sh
 curl-arm:
 	./tools/build_curl_arm.sh
+
+# AI 助手：宿主机转发服务（板子能连到本机时用；另开一个终端跑，别关）
+#   密钥放 tools/ai_secret.conf（已 gitignore），板子侧写 relay_url / relay_key
+relay:
+	python3 tools/ai_relay.py
+
+# AI 助手：宿主机桥接（板子连不到本机时用；另开一个终端跑，别关）
+#   板子侧 ai.conf 写 transport=/root/shixi/ai_bridge_board.sh
+bridge:
+	./tools/ai_bridge.sh
 
 # 字体回归探针（主机程序）：新引擎 vs 归档图集的度量与观感对照
 # archive/font_atlas.h 只作为「版面基准」存在，不再参与板上构建
@@ -115,4 +127,4 @@ pinyin-test:
 	@./bin/pinyin_test
 
 clean:
-	rm -f $(BOARD_BIN) $(HOST_BIN) bin/fbshot bin/touchsim bin/camtest bin/jpgbench bin/v4l2mock.so bin/fontprobe bin/pinyin_test bin/mplayer bin/ai_parse_test
+	rm -f $(BOARD_BIN) $(HOST_BIN) bin/fbshot bin/touchsim bin/camtest bin/jpgbench bin/v4l2mock.so bin/fontprobe bin/pinyin_test bin/mplayer bin/ai_parse_test bin/aitest

@@ -1,2 +1,10 @@
 bin/
 tools/testdata/
+
+# ---- AI 密钥与本地配置：绝不提交 ----
+tools/ai_secret.conf
+tools/ai_secret.conf.*
+!tools/ai_secret.conf.example
+ai.conf
+relay_url
+relay_key

@@ -95,7 +95,7 @@ static void run_case(const char *fixture, const char *http)
     FILE *e = fopen("/tmp/ai-parse-test.err", "wb");
     fputs("", e);
     fclose(e);
-    snprintf(g_url, sizeof(g_url), "%s", "http://169.254.134.123:3688/v1/chat/completions");
+    snprintf(g_url, sizeof(g_url), "%s", "http://192.0.2.10:3688/v1/chat/completions");
     g_reply[0] = 0;
     g_error[0] = 0;
     g_state = AI_IDLE;
@@ -246,13 +246,13 @@ int main(void)
 
     printf("\n[8] curl 退出码 → 文案（连不上 / 超时）\n");
     {
-        snprintf(g_url, sizeof(g_url), "%s", "http://169.254.134.123:3688/v1/chat/completions");
+        snprintf(g_url, sizeof(g_url), "%s", "http://192.0.2.10:3688/v1/chat/completions");
         g_error[0] = 0;
         g_state = AI_IDLE;
         g_pending_ret = 0;
         classify(7 << 8);
         cki("退出码 7 → AI_ERR", g_state, AI_ERR);
-        ckhas("文案里有目标地址", g_error, "169.254.134.123:3688");
+        ckhas("文案里有目标地址", g_error, "192.0.2.10:3688");
         ckhas("提示连不上", g_error, "连不上宿主机");
 
         g_error[0] = 0;

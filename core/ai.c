@@ -9,6 +9,14 @@
  *   · exec 前 close(3..)：别把 /dev/fb0、触摸设备和 flock 单实例锁带给子进程
  *     （工单 21 实测 mplayer 会继承它们；curl 短命，但卡住时同样会攥着锁）
  *   · 只保留最近 N 轮；**失败/取消的轮次不写历史**，所以重试不会重复记录
+ *
+ * 可插拔传输（merge 自 AI 聊天分支，见 README「AI 助手」）：
+ *   ai.conf 里写 transport=<shell 命令>（或环境变量 SHIXI_LLM_TRANSPORT）后，
+ *   不再 exec curl，而是 `sh -c "<transport>"`，并把请求/响应文件路径通过
+ *   SHIXI_AI_REQ / SHIXI_AI_RESP 传给它；命令需要把响应体写进 $SHIXI_AI_RESP、
+ *   把 HTTP 状态码打到 stdout（stdout/stderr 已重定向到 ai_status.txt / ai_err.txt）。
+ *   用途：开发板连不到宿主机 relay（例如 Windows 防火墙挡住入站）时，
+ *   改用 tools/ai_bridge.sh 的「文件握手」方式中转。此模式下板子不需要任何密钥。
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,7 +50,9 @@ typedef struct {
 } AiRound;
 
 static char g_url[256], g_key[256], g_model[64], g_curl[512];
-static char g_req[512], g_resp[512], g_status[512], g_errfile[512], g_curlcfg[512];
+static char g_transport[AI_CONF_MAX];   /* 非空 = 用自定义命令代替 curl */
+static char g_curlcfg[512];
+static char g_req[512], g_resp[512], g_status[512], g_errfile[512];
 static char g_conf[512];
 static int  g_max_tokens = 800, g_timeout = 20, g_history_n = 3;
 static int  g_ready = 0;
@@ -415,6 +425,10 @@ int ai_init(void)
     if (conf_get_int("timeout", &n)) g_timeout = n;
     if (conf_get_int("history", &n) && n <= AI_MAX_ROUNDS) g_history_n = n;
 
+    g_transport[0] = 0;
+    if ((e = getenv("SHIXI_LLM_TRANSPORT")) && *e) snprintf(g_transport, sizeof(g_transport), "%s", e);
+    else conf_get("transport", g_transport, sizeof(g_transport));
+
     if ((e = getenv("SHIXI_CURL")) && *e) snprintf(g_curl, sizeof(g_curl), "%s", e);
     else {
         snprintf(p, sizeof(p), "%s/curl", root);
@@ -426,7 +440,7 @@ int ai_init(void)
     return g_url[0] ? 1 : 0;
 }
 
-int ai_configured(void) { return g_url[0] ? 1 : 0; }
+int ai_configured(void) { return (g_url[0] || g_transport[0]) ? 1 : 0; }
 const char *ai_model(void) { return g_model; }
 const char *ai_reply(void) { return g_reply; }
 const char *ai_error(void) { return g_error; }
@@ -495,6 +509,14 @@ static int spawn_curl(void)
         long maxfd = sysconf(_SC_OPEN_MAX);
         if (maxfd < 0 || maxfd > 1024) maxfd = 1024;
         for (int fd = 3; fd < (int)maxfd; fd++) close(fd);
+        if (g_transport[0]) {
+            /* 自定义传输：把请求/响应文件路径交给命令，stdout 要回 HTTP 状态码 */
+            setenv("SHIXI_AI_REQ", g_req, 1);
+            setenv("SHIXI_AI_RESP", g_resp, 1);
+            setenv("SHIXI_AI_TIMEOUT", tmo, 1);
+            execl("/bin/sh", "sh", "-c", g_transport, (char *)NULL);
+            _exit(127);
+        }
         execlp(g_curl, "curl", "-sS", "--max-time", tmo, "--connect-timeout", "4",
                "-K", g_curlcfg, "--data-binary", reqarg,
                "-o", g_resp, "-w", "%{http_code}", g_url, (char *)NULL);
@@ -512,15 +534,19 @@ void ai_ask(const char *text)
     g_reply[0] = 0;
     g_error[0] = 0;
 
-    if (!g_url[0]) { set_err("没有配置模型地址（试试把 endpoint 写进 relay_url）"); return; }
-    if (!g_key[0]) { set_err("缺少 relay_key（把宿主机 CCX 的密钥放到 %s/relay_key）",
-                             media_root()); return; }
-    /* 密钥会写进 curl 的配置文件，含引号/换行会把配置写坏 */
-    if (strchr(g_key, '"') || strchr(g_key, '\n') || strchr(g_key, '\r')) {
-        set_err("relay_key 里有非法字符（引号或换行）");
-        return;
+    if (g_transport[0]) {
+        /* 走自定义传输（如宿主机桥接）：不需要 relay_url / relay_key */
+    } else {
+        if (!g_url[0]) { set_err("没有配置模型地址（试试把 endpoint 写进 relay_url）"); return; }
+        if (!g_key[0]) { set_err("缺少 relay_key（把宿主机 CCX 的密钥放到 %s/relay_key）",
+                                 media_root()); return; }
+        /* 密钥会写进 curl 的配置文件，含引号/换行会把配置写坏 */
+        if (strchr(g_key, '"') || strchr(g_key, '\n') || strchr(g_key, '\r')) {
+            set_err("relay_key 里有非法字符（引号或换行）");
+            return;
+        }
+        if (write_curl_cfg() != 0) { set_err("无法写临时配置 %s", g_curlcfg); return; }
     }
-    if (write_curl_cfg() != 0) { set_err("无法写临时配置 %s", g_curlcfg); return; }
     if (write_request() != 0)  { set_err("无法写请求文件 %s", g_req); return; }
     if (spawn_curl() != 0)     { set_err("启动 curl 失败（%s）", g_curl); return; }
 
@@ -598,8 +624,9 @@ static void classify(int status)
         } else {
             char line[160];
             read_first_line(g_errfile, line, sizeof(line));
-            if (line[0]) set_err("curl 出错（%d）：%s", code, line);
-            else         set_err("curl 出错，退出码 %d", code);
+            const char *who = g_transport[0] ? "传输命令" : "curl";
+            if (line[0]) set_err("%s 出错（%d）：%s", who, code, line);
+            else         set_err("%s 出错，退出码 %d", who, code);
         }
         return;
     }
@@ -620,7 +647,11 @@ static void classify(int status)
     } else {
         body[0] = 0;
     }
-    if (blen == 0 && http == 0) { set_err("没有拿到任何响应（curl 没输出）"); return; }
+    if (blen == 0 && http == 0) {
+        set_err(g_transport[0] ? "没有拿到任何响应（桥接脚本没在运行？）"
+                               : "没有拿到任何响应（curl 没输出）");
+        return;
+    }
 
     if (http >= 200 && http < 300) {
         const char *choice = json_first_choice(body);
@@ -660,7 +691,8 @@ static void classify(int status)
     }
 
     if (http == 401 || http == 403) {
-        set_err("密钥被拒（检查 %s/relay_key）", media_root());
+        set_err(g_transport[0] ? "被拒绝（HTTP %d，检查桥接脚本的密钥）"
+                               : "密钥被拒（检查 %s/relay_key）", http);
         return;
     }
     if (http == 400) {

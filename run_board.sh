@@ -69,6 +69,13 @@ start)
         echo "    提示：bin/curl-arm 不存在，AI 助手所需的 curl 未推送（见 tools/build_curl_arm.sh）"
     fi
     # 字体：运行时用 stb_truetype 栅格化，板上缺了就是红屏退出，所以必须一起推并校验
+    # AI 桥接的板端命令（板子连不到宿主机 relay 时用，见 README「AI 助手」）
+    if [ -f "$HERE/tools/ai_bridge_board.sh" ]; then
+        $SCP "$HERE/tools/ai_bridge_board.sh" "$BOARD:$BOARD_DIR/ai_bridge_board.sh" >/dev/null
+        $SSH "chmod +x $BOARD_DIR/ai_bridge_board.sh" >/dev/null
+        echo "    已附带 AI 桥接脚本 ai_bridge_board.sh"
+    fi
+
     if [ -f "$HERE/tools/SimHei.ttf" ]; then
         $SCP "$HERE/tools/SimHei.ttf" "$BOARD:$BOARD_DIR/SimHei.ttf" >/dev/null
         echo "    已附带字体 SimHei.ttf（$(du -h "$HERE/tools/SimHei.ttf" | cut -f1)）"

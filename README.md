@@ -16,15 +16,146 @@
 
 ---
 
-## 一、快速开始
+## 一、从零开始：连上开发板 → 跑起来
+
+下面这条链路是**从没用过这块板子开始**的完整流程，照顺序做即可。已经连过板子的话，
+可以直接跳到 [第 5 步](#5-编译并一键部署)。
+
+### 1. 硬件准备
+
+| 东西 | 说明 |
+|---|---|
+| GEC6818 开发板 + 7 寸屏 | 800×480 电容触摸屏（`gslX680`，坐标 0..1024 / 0..600），随机附带 |
+| **5V 电源适配器** | 接板子 CN1 圆口。**别只靠 USB 线供电**：摄像头一出图就掉线（实测 `error -32`）多半是这里 |
+| 网线一根 | 一头插电脑网口，一头插板子网口（直连即可，不需要交换机/路由器） |
+| USB 摄像头（可选） | 免驱 UVC 的；插板子的 USB Host 口。**OTG 口不能当 host 用**（板上没接收发器） |
+| 串口线（可选） | 板子起不来、网也不通时，用 UART0（DB9）接 SecureCRT/XShell 看启动日志 |
+
+### 2. 板子开机后的默认状态
+
+板子 `/etc/profile` 里自带 `ifconfig eth0 169.254.193.77`，所以：
+
+| 项目 | 值 |
+|---|---|
+| 板子 IP | `169.254.193.77`（eth0，链路本地地址） |
+| 登录 | `root` / `123456`（SSH 22、Telnet 23 都已开） |
+| 程序安装目录 | `/root/shixi/` |
+| 内核 / C 库 | Linux 3.4.39-gec / glibc 2.23（**这就是必须静态链接的原因**） |
+
+### 3. 电脑侧网络：确认和板子同网段
+
+板子的 `169.254.x.x` 是"链路本地地址"，电脑这块网卡只要也是 `169.254.x.x` 就能互通。
+Windows 不插路由器时会自动分配（APIPA）；Linux 上可以手动加一个：
 
 ```bash
-cd dsktp             # 项目根目录（本 README 所在目录）
+# Linux/WSL（把 ethX 换成插网线的那张网卡；169.254.195.149 只是举例，同网段即可）
+sudo ip addr add 169.254.195.149/16 dev ethX
+ip addr | grep 169.254            # 确认本机地址（Windows 用 ipconfig）
+ping -c 3 169.254.193.77          # 能通就可以 SSH 了
+```
+
+> 不通的排查顺序：网线插紧（看网口灯）→ 电脑网卡是不是被设成了别的固定 IP →
+> 板子是不是还在启动（屏幕亮了吗）→ 上串口看 `ifconfig`。
+
+### 4. SSH 连接开发板
+
+```bash
+ssh root@169.254.193.77           # 密码 123456，首次连接输入 yes 确认指纹
+```
+
+在板子上确认一下环境和设备节点（这几条决定了程序能不能跑）：
+
+```sh
+uname -a                          # Linux GEC6818 3.4.39-gec armv7l
+ls -l /dev/fb0                    # 屏幕：framebuffer，800x480x32bpp
+ls -l /dev/input/event0           # 触摸屏（gslX680 电容屏）
+cat /sys/class/input/event0/device/name
+ls /dev/video*                    # 摄像头（没插就只有 video0..6 这些 SoC 内部设备）
+df -h /                           # 剩余空间（约 240MB 可用）
+free -m                           # 内存（约 780MB 可用）
+```
+
+顺手把板子时间设对（板子没有联网对时；断电后 RTC 可能回到 2015 年，
+照片/视频的时间戳就是它）：
+
+```sh
+date -s "2026-09-21 11:05:00"
+```
+
+> 想免密登录：把电脑的公钥写进板子 `/root/.ssh/authorized_keys` 即可；
+> 但注意板子 sshd 对 `authorized_keys` 的属主/权限很挑（`bad ownership or modes` 会忽略它）。
+
+### 5. 编译并一键部署
+
+在电脑上（本 README 所在目录，即仓库根目录）：
+
+```bash
+git clone https://github.com/chiffontopia/shixi-camera.git
+cd shixi-camera
+
+make                 # 交叉编译（工具链自动挑选，静态链接）
+./run_board.sh start # 编译 + 推送 + 在板子上后台启动
+./run_board.sh logs  # 看启动日志
+```
+
+`run_board.sh start` 会做四件事：`make` → 停掉板上旧进程 → scp 上传
+（`shixi`、静态 `curl`、字体 `SimHei.ttf`、AI 桥接脚本）→ `setsid nohup` 后台启动。
+板子地址/密码可用环境变量覆盖：`BOARD=root@1.2.3.4 PW=xxx ./run_board.sh start`。
+
+> - `run_board.sh` 优先用 `sshpass`；**没装 sshpass 会自动改用 OpenSSH 的 `SSH_ASKPASS`**
+>   （Ubuntu/WSL 上常见），不需要额外安装。
+> - scp 必须带 `-O`：新版 OpenSSH 默认走 sftp，老板子的 sshd 不支持。
+
+### 6. 在板子上用
+
+程序启动后就是手机式桌面，直接**用手指点**（详见 [第三节](#三界面操作说明)）。
+不用跑到板子跟前也能验证：
+
+```bash
+./run_board.sh shot        # 截屏并转成 PNG（需要 pillow）
+./run_board.sh tap 400 430 # 注入一次点击（程序需以调试输入启动，run_board.sh 默认开着）
+./run_board.sh stop        # 停止
+```
+
+### 7. 可选：接摄像头 / 开 AI 聊天
+
+- **摄像头**：插上免驱 UVC 摄像头 → 进"拍照/录像"界面会在 2 秒内自动切到实时画面
+  （热插拔，不用重启程序）。有问题先跑 `/root/shixi/camtest`（见第四节）。
+- **AI 聊天**：板子自身没有外网，需要电脑上跑一个转发服务 —— 两条路线与配置见
+  [第九节](#九ai-助手宿主机转发--桥接怎么让聊天能用)。
+
+### 8. 可选：开机自启
+
+```sh
+# 在开发板上执行：把启动命令追加到 /etc/profile
+echo 'cd /root/shixi && ./shixi &' >> /etc/profile
+# 取消自启：编辑 /etc/profile 删掉这一行
+```
+
+### 9. 出问题先看这几条
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| `ssh: connect ... timed out` | 电脑网卡不在 `169.254.x.x`；或板子还没起来（看屏幕/串口） |
+| `scp: ... Text file busy` | 板上程序还在跑 → 先 `./run_board.sh stop`，或让 `run_board.sh` 自己停 |
+| 板上运行报 `GLIBC_2.3x not found` | 编译时没静态链接（板子 glibc 2.23，工具链是 2.39） |
+| 程序起来但屏幕黑 / 报缺字体 | `SimHei.ttf` 没推上去（`run_board.sh` 会检查并报错） |
+| 摄像头 `error -32` / `unable to enumerate` | 供电或线材；见第四节与第十一节 |
+| 拍照/录像界面 3 秒后回演示画面 | 摄像头掉线了：供电不足或线材，程序会自动退回演示画面并重试 |
+| 聊天一直"正在思考…" | 宿主机转发服务没开（relay 或 bridge），见第九节 |
+| 照片时间戳是 2015 年 | 板子没对时：`date -s "..."` |
+
+---
+
+## 二、快速开始（速查）
+
+已经连过板子、只想跑一遍的话，就是这四条：
+
+```bash
+cd shixi-camera       # 仓库根目录（本 README 所在目录）
 make                 # 交叉编译到开发板（工具链自动挑选，静态链接）
 ./run_board.sh start # 编译 + 上传 + 在板子上后台启动
 ./run_board.sh shot  # 截屏并转成 PNG，看当前界面
-./run_board.sh logs  # 查看运行日志
-./run_board.sh stop  # 停止
 ```
 
 板子默认地址 `root@169.254.193.77`（密码 `123456`），程序安装到 `/root/shixi/`。
@@ -54,7 +185,8 @@ make CROSS=arm-linux- ARCH_FLAGS="-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=softfp"
 ### 板端小工具
 
 ```bash
-make tools          # 生成 bin/fbshot（截屏）与 bin/touchsim（虚拟触摸屏）
+make tools          # bin/fbshot（截屏）· touchsim（虚拟触摸屏）· camtest（摄像头诊断）
+                    # · jpgbench（JPEG 编码基准）· aitest（AI 链路自检）
 make curl-arm       # 生成 bin/curl-arm：静态、纯 HTTP 的 curl（AI 助手连宿主机用）
 ```
 
@@ -69,17 +201,9 @@ cd /root/shixi
 ./shixi                 # 前台运行，Ctrl+C 退出
 ```
 
-### 开机自启（可选，会改板子系统配置）
-
-```sh
-# 在开发板上执行：把启动命令追加到 /etc/profile
-echo 'cd /root/shixi && ./shixi &' >> /etc/profile
-# 取消自启：编辑 /etc/profile 删掉这一行
-```
-
 ---
 
-## 二、界面操作说明
+## 三、界面操作说明
 
 | 界面 | 操作 |
 |---|---|
@@ -120,7 +244,7 @@ SHIXI_TTF=/path/font.ttf   # 换字体（默认 SimHei.ttf）
 
 ---
 
-## 三、摄像头
+## 四、摄像头
 
 程序启动时自动扫描 `/dev/video0..15`，挑选第一个支持视频采集的设备（UVC 摄像头），
 优先协商 **MJPEG**（帧可直接存成照片/写入视频），不支持时退回 **YUYV** 并自行转 RGB 与编码 JPEG。
@@ -135,7 +259,7 @@ SHIXI_TTF=/path/font.ttf   # 换字体（默认 SimHei.ttf）
 
 ---
 
-## 四、文件与存储
+## 五、文件与存储
 
 ```
 /root/shixi/
@@ -160,7 +284,7 @@ SHIXI_TTF=/path/font.ttf   # 换字体（默认 SimHei.ttf）
 
 ---
 
-## 五、代码结构
+## 六、代码结构
 
 ```
 src/
@@ -227,7 +351,7 @@ src/
 
 ---
 
-## 六、调试与验证工具
+## 七、调试与验证工具
 
 ### 0) 摄像头诊断（插上摄像头后先跑这个）
 
@@ -317,7 +441,7 @@ make pinyin-test   # 音节判定 / 音节切分 / 候选顺序（含 e 块与 �
 
 ---
 
-## 七、实现要点（可能对报告/答辩有用）
+## 八、实现要点（可能对报告/答辩有用）
 
 1. **显示**：`/dev/fb0` 是 800×1440 的虚拟缓冲（3 屏），用 `FBIOPAN_DISPLAY` 做双缓冲翻页，
    画面无撕裂；像素格式 `0x00RRGGBB`。
@@ -384,7 +508,70 @@ make pinyin-test   # 音节判定 / 音节切分 / 候选顺序（含 e 块与 �
 
 ---
 
-## 八、音频说明（重要）
+## 九、AI 助手：宿主机转发 / 桥接（怎么让聊天能用）
+
+板端 `core/ai.c` 只管「拼请求、发出去、把 JSON 解析回来」；真正连云端的两条路都在电脑上，
+**云端密钥只留在电脑里**（板子根本不需要知道它）。
+
+### 路线 A：宿主机 relay（板子能连到电脑时用，推荐）
+
+```bash
+cp tools/ai_secret.conf.example tools/ai_secret.conf   # 填 endpoint / api_key / relay_key
+python3 tools/ai_relay.py                              # 或 make relay；监听 0.0.0.0:3688
+```
+
+板子侧（`$SHIXI_ROOT/`）：
+
+```sh
+echo 'http://<电脑IP>:3688/v1/chat/completions' > relay_url
+printf '%s' '<与 ai_secret.conf 里 relay_key 相同的口令>' > relay_key && chmod 600 relay_key
+```
+
+链路：板端静态 curl → 本机 relay（校验 relay_key）→ 带真密钥请求云端。
+注意电脑防火墙要放通 3688（WSL 还要把端口转发进虚拟机）。
+`ai_relay.py` 转发时伪装成 curl 的 User-Agent —— 默认的 `Python-urllib/x.y` 会被某些
+CDN/WAF 直接 403（实测 `error code: 1010`），这个坑已经在脚本里踩过了。
+
+### 路线 B：宿主机桥接（板子连不到电脑时用）
+
+有些环境板子根本打不到 relay（Windows 防火墙挡入站、WSL 端口转发没配）。这条只借用
+**电脑 → 板子**这个已经通的 SSH 方向，不需要放通任何端口：
+
+```bash
+./tools/ai_bridge.sh          # 或 make bridge；另开一个终端挂着，读同一份 ai_secret.conf
+```
+
+板子侧 `ai.conf` 里加一行（`run_board.sh` 会自动把该脚本推到板上）：
+
+```ini
+transport=/root/shixi/ai_bridge_board.sh
+```
+
+链路：板子写 `tmp/ai_bridge_req.json` → 电脑轮询取走（`mv` 原子取，不会重复处理）→
+电脑调云端 → 写回 `tmp/ai_bridge_resp.txt` → 板子搬进 ai.c 的响应文件并按 HTTP 码判断成败。
+
+两条路线可以随时切换：配了 `transport` 就忽略 `relay_url`，反之亦然；
+`SHIXI_LLM_TRANSPORT` 环境变量可临时覆盖。
+
+### 自检与排查
+
+```sh
+./aitest "你好"                      # 板端：不开界面验证整条链路（成功 / 失败 / 超时三态）
+cat $SHIXI_ROOT/tmp/ai_req.json      # 发出去的请求体（长什么样一眼看到）
+cat $SHIXI_ROOT/tmp/ai_status.txt    # HTTP 状态码
+cat $SHIXI_ROOT/tmp/ai_err.txt       # 传输命令的 stderr
+```
+
+### 密钥卫生
+
+- `tools/ai_secret.conf`、`ai.conf`、`relay_url`、`relay_key` 都在 `.gitignore` 里，不会被提交；
+  模板见 `ai.conf.example` 与 `tools/ai_secret.conf.example`。
+- 板子只持有 `relay_key`（本机口令，可随时换），云端密钥只写在电脑上。
+- 万一密钥曾进过版本库，光删除不够——请到控制台**轮换**该密钥。
+
+---
+
+## 十、音频说明（重要）
 
 - **本项目的摄像头不带 USB 音频**：这类便宜 UVC 模块通常只有视频接口
   （`class 0x0e`），没有音频接口（`class 0x01`），所以 Linux 下看不到它的麦克风。
@@ -395,15 +582,15 @@ make pinyin-test   # 音节判定 / 音节切分 / 候选顺序（含 e 块与 �
   要录音需要自己写一个小 ALSA 采集程序（直接 ioctl，不依赖 libasound）。
 - 因此当前**录像没有声音**。
 
-## 九、已知限制
+## 十一、已知限制
 
 - **AI 聊天要有宿主机服务才能答**：板子只可能打到它 ARP 表里那个邻居（宿主机 USB 网卡的自分配地址，
-  形如 `169.254.134.123:3688`），**没有默认网关、连不到 WSL 的地址**。宿主机上的 CCX 转发服务没开、
+  形如 `169.254.x.x:3688`），**没有默认网关、连不到 WSL 的地址**。宿主机上的 CCX 转发服务没开、
   或者地址变了，界面会明确说「连不上宿主机（…）」并给「重试」，不会假装回答。
   没配 `relay_url` 时退回本地预设文案（气泡里标注「演示回复」）。
 - 回复以**非流式**整段返回（服务支持 SSE，本轮没用）：首字要等 0.6~1.0 秒（`deepseek-flash`），
   期间显示「正在思考…」。超过 `ChatMsg.text` 上限的长回复按 UTF-8 边界截断并标注。
-- 录像**没有声音**，原因见第八节。
+- 录像**没有声音**，原因见第十节。
 - 视频帧率取决于摄像头：MJPEG 摄像头可到 15–30fps；YUYV 摄像头需要板上编码 JPEG，
   实测约 6–10fps（录制时按实测帧率写头，播放速度正常）。
 - 演示画面模式下 JPEG 编码占用较高，预览约 17fps；接真实摄像头会更流畅。
