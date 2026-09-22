@@ -402,25 +402,60 @@ static void draw_input_bar(Surface *s, int y)
 }
 
 /* ---------- 屏幕键盘 ---------- */
-#define KEY_W 68
-#define KEY_H 44
-#define KEY_GAP 6
+/*
+ * 键位：从 68x44/间隙6 放大到 74x46/间隙4（手指目标是 12.9mm -> 14mm 宽），
+ * 并且**绘制与命中测试共用同一套布局**——之前第 4 行画按 7 列居中、判定按 8 列，
+ * 整行错位 37px，"看着点这个键、实际点到旁边"，就是手感差的根因。
+ */
+#define KEY_W 74
+#define KEY_H 46
+#define KEY_GAP 4
+#define KEY_SLOP 6                 /* 命中时上下左右的容差，消掉键间死区 */
 #define KB_TOP (SCREEN_H - 5 * (KEY_H + KEY_GAP) - 12)
 
-static const char *KB_ROW1 = "1234567890";
-static const char *KB_ROW2 = "qwertyuiop";
-static const char *KB_ROW3 = "asdfghjkl";
-static const char *KB_ROW4 = "zxcvbnm";
+#define KB_ROW1 "1234567890"
+#define KB_ROW2 "qwertyuiop"
+#define KB_ROW3 "asdfghjkl"
+#define KB_ROW4 "zxcvbnm"
+static const char *kb_rows[4] = {KB_ROW1, KB_ROW2, KB_ROW3, KB_ROW4};
 
-static void kb_key_rect(int row, int col, int ncols, int *x, int *y, int *w, int *h)
+/* 第 4 行占 8 格（前 7 格字母 + 最后 1 格退格），其余行格数 = 字母个数 */
+static int kb_ncols(int row) { return row == 3 ? 8 : (int)strlen(kb_rows[row]); }
+
+static int kb_row_y(int row) { return KB_TOP + row * (KEY_H + KEY_GAP); }
+
+/* 取某一格的矩形（绘制与判定都以它为准） */
+static void kb_cell(int row, int col, int *x, int *y, int *w, int *h)
 {
-  int total = ncols * KEY_W + (ncols - 1) * KEY_GAP;
+  int n = kb_ncols(row);
+  int total = n * KEY_W + (n - 1) * KEY_GAP;
   int x0 = (SCREEN_W - total) / 2;
   *x = x0 + col * (KEY_W + KEY_GAP);
-  *y = KB_TOP + row * (KEY_H + KEY_GAP);
+  *y = kb_row_y(row);
   *w = KEY_W;
   *h = KEY_H;
 }
+
+/* 第五行（功能键）同样只此一份表，绘制与判定共用 */
+enum
+{
+  KBAR_SHIFT = 0,
+  KBAR_SPACE,
+  KBAR_HIDE,
+  KBAR_SEND,
+  KBAR_LANG,
+  KBAR_COUNT
+};
+static const struct
+{
+  int x, w;
+} kb_bar[KBAR_COUNT] = {
+    {8, 92}, {110, 300}, {420, 92}, {522, 128}, {660, 132}};
+
+static int kb_bar_y(void) { return kb_row_y(4); }
+
+/* 落在键盘区域内的按下键（用于高亮反馈）；-1 = 没按在键上 */
+static int kb_down_row = -1, kb_down_col = -1;
 
 /* ---------- 候选条（复用输入预览那条 30px 的横条，不额外占版面） ---------- */
 typedef struct
@@ -501,42 +536,56 @@ static void draw_keyboard(Surface *s)
     icon_draw_cached(s, IC_SEND, SCREEN_W - 44, KB_TOP - 27, 15, C_BLACK);
   }
 
-  const char *rows[4] = {KB_ROW1, KB_ROW2, KB_ROW3, KB_ROW4};
   for (int r = 0; r < 4; r++)
   {
-    int n = (int)strlen(rows[r]);
+    int n = (int)strlen(kb_rows[r]);
     for (int c = 0; c < n; c++)
     {
       int x, y, w, h;
-      kb_key_rect(r, c, n, &x, &y, &w, &h);
-      char label[2] = {rows[r][c], 0};
+      int col = (r == 3) ? c : c; /* 第4行前 7 格是字母，第 8 格留给退格 */
+      kb_cell(r, col, &x, &y, &w, &h);
+      char label[2] = {kb_rows[r][c], 0};
       if (kb_shift)
         label[0] = (char)(label[0] - 'a' + 'A');
-      gfx_fill_round_rect(s, x, y, w, h, 8, C_SURFACE2);
-      text_draw_vcenter_center(s, x + w / 2, y, h, label, FONT_BODY, C_TEXT);
+      /* 按下时高亮：手指按上去立刻有反馈，不必等抬起 */
+      int pressed = (kb_down_row == r && kb_down_col == c);
+      gfx_fill_round_rect(s, x, y, w, h, 8, pressed ? C_ACCENT : C_SURFACE2);
+      text_draw_vcenter_center(s, x + w / 2, y, h, label, FONT_BODY,
+                               pressed ? C_BLACK : C_TEXT);
     }
   }
   /* 第四行右侧：退格 */
   int x, y, w, h;
-  kb_key_rect(3, 7, 8, &x, &y, &w, &h);
-  gfx_fill_round_rect(s, x, y, w, h, 8, RGB(0x3a, 0x2a, 0x2e));
+  kb_cell(3, 7, &x, &y, &w, &h);
+  {
+    int pressed = (kb_down_row == 3 && kb_down_col == 7);
+    gfx_fill_round_rect(s, x, y, w, h, 8, pressed ? RGB(0xff, 0x8a, 0x92) : RGB(0x3a, 0x2a, 0x2e));
+  }
   icon_draw_cached(s, IC_BACK, x + w / 2, y + h / 2, 22, RGB(0xff, 0xb0, 0xb8));
-  /* 第五行：空格 / 大写 / 收起 / 发送 */
-  int y5 = KB_TOP + 4 * (KEY_H + KEY_GAP);
-  gfx_fill_round_rect(s, 18, y5, 96, KEY_H, 8, C_SURFACE2);
-  text_draw_vcenter_center(s, 18 + 48, y5, KEY_H, kb_shift ? "小写" : "大写", FONT_SMALL, C_TEXT_DIM);
-  gfx_fill_round_rect(s, 124, y5, 300, KEY_H, 8, C_SURFACE2);
-  text_draw_vcenter_center(s, 124 + 150, y5, KEY_H, "空格", FONT_BODY, C_TEXT);
-  gfx_fill_round_rect(s, 434, y5, 96, KEY_H, 8, C_SURFACE2);
-  text_draw_vcenter_center(s, 434 + 48, y5, KEY_H, "收起", FONT_BODY, C_TEXT_DIM);
-  gfx_fill_round_rect(s, 540, y5, 120, KEY_H, 8,
-                      waiting ? RGB(0xb3, 0x32, 0x3c) : (draft[0] ? C_ACCENT : C_SURFACE2));
-  text_draw_vcenter_center(s, 540 + 60, y5, KEY_H, waiting ? "取消" : "发送", FONT_BODY,
-                           waiting ? C_WHITE : (draft[0] ? C_BLACK : C_TEXT_MUTED));
-  /* 中/英切换（键面显示当前模式） */
-  gfx_fill_round_rect(s, 672, y5, 96, KEY_H, 8, cn_mode ? C_ACCENT : C_SURFACE2);
-  text_draw_vcenter_center(s, 672 + 48, y5, KEY_H, cn_mode ? "中" : "En", FONT_BODY,
-                           cn_mode ? C_BLACK : C_TEXT_DIM);
+  /* 第五行：大写 / 空格 / 收起 / 发送 / 中英（与命中测试共用 kb_bar 表） */
+  int y5 = kb_bar_y();
+  for (int i = 0; i < KBAR_COUNT; i++)
+  {
+    int bx = kb_bar[i].x, bw = kb_bar[i].w;
+    int pressed = (kb_down_row == 4 && kb_down_col == i);
+    uint32_t bg = C_SURFACE2;
+    uint32_t fg = C_TEXT_DIM;
+    const char *label = "";
+    FontId f = FONT_BODY;
+    if (i == KBAR_SHIFT) { label = kb_shift ? "小写" : "大写"; f = FONT_SMALL; }
+    else if (i == KBAR_SPACE) { label = "空格"; fg = C_TEXT; }
+    else if (i == KBAR_HIDE) { label = "收起"; }
+    else if (i == KBAR_SEND)
+    {
+      label = waiting ? "取消" : "发送";
+      bg = waiting ? RGB(0xb3, 0x32, 0x3c) : (draft[0] ? C_ACCENT : C_SURFACE2);
+      fg = waiting ? C_WHITE : (draft[0] ? C_BLACK : C_TEXT_MUTED);
+    }
+    else { label = cn_mode ? "中" : "En"; bg = cn_mode ? C_ACCENT : C_SURFACE2; fg = cn_mode ? C_BLACK : C_TEXT_DIM; }
+    if (pressed) { bg = C_ACCENT; fg = C_BLACK; }
+    gfx_fill_round_rect(s, bx, y5, bw, KEY_H, 8, bg);
+    text_draw_vcenter_center(s, bx + bw / 2, y5, KEY_H, label, f, fg);
+  }
   (void)h;
 }
 
@@ -693,61 +742,104 @@ void app_chat_frame(uint64_t t_ms)
 }
 
 /* 键盘命中测试 */
-static int kb_hit(const UiEvent *e)
+/*
+ * 坐标 -> (行,列)。行与行之间、键与键之间的缝隙都算进"最近的键"，
+ * 手指落在缝里也能按到键——密集小目标最怕的死区就是这么来的。
+ * 返回 0 = 没落在键盘上。
+ */
+static int kb_pick(int px, int py, int *row, int *col)
 {
-  const char *rows[4] = {KB_ROW1, KB_ROW2, KB_ROW3, KB_ROW4};
-
-  /* 候选条：点哪个字就提交哪个 */
-  if (cn_mode && py[0] && ui_hit(e->x, e->y, 16, KB_TOP - 42, SCREEN_W - 132, 30))
-  {
-    CandSlot cs[CAND_MAX];
-    int n = cand_layout(cs, CAND_MAX);
-    for (int i = 0; i < n; i++)
-    {
-      if (ui_hit(e->x, e->y, cs[i].x, KB_TOP - 42, cs[i].w, 30))
-      {
-        const char *p = cand_chars + cs[i].off;
-        int clen = utf8_len((unsigned char)*p);
-        char one[8];
-        memcpy(one, p, (size_t)clen);
-        one[clen] = 0;
-        py_commit(one);
-        return 1;
-      }
-    }
-  }
   for (int r = 0; r < 4; r++)
   {
-    int n = (int)strlen(rows[r]);
-    int ncols = (r == 3) ? 8 : n;
-    for (int c = 0; c < n; c++)
+    int y0 = kb_row_y(r);
+    if (py < y0 - KEY_SLOP || py >= y0 + KEY_H + KEY_SLOP)
+      continue;
+    int n = kb_ncols(r);
+    int total = n * KEY_W + (n - 1) * KEY_GAP;
+    int x0 = (SCREEN_W - total) / 2;
+    if (px < x0 - KEY_SLOP || px >= x0 + total + KEY_SLOP)
+      continue;
+    int c = (px - x0 + KEY_GAP / 2) / (KEY_W + KEY_GAP); /* 间隙并入相邻格 */
+    if (c < 0)
+      c = 0;
+    if (c >= n)
+      c = n - 1;
+    *row = r;
+    *col = c;
+    return 1;
+  }
+  int y5 = kb_bar_y();
+  if (py >= y5 - KEY_SLOP && py < y5 + KEY_H + KEY_SLOP)
+  {
+    for (int i = 0; i < KBAR_COUNT; i++)
     {
-      int x, y, w, h;
-      kb_key_rect(r, c, ncols, &x, &y, &w, &h);
-      if (ui_hit(e->x, e->y, x, y, w, h))
+      if (px >= kb_bar[i].x - KEY_SLOP && px < kb_bar[i].x + kb_bar[i].w + KEY_SLOP)
       {
-        char ch = rows[r][c];
-        char one[2];
-        if (cn_mode && r > 0)
-        {
-          py_key(ch);
-          return 1;
-        } /* 字母行进拼音 */
-        if (!cn_mode && kb_shift && ch >= 'a' && ch <= 'z')
-          ch = (char)(ch - 'a' + 'A');
-        one[0] = ch;
-        one[1] = 0;
-        draft_append(one);
+        *row = 4;
+        *col = i;
         return 1;
       }
     }
   }
-  int x, y, w, h;
-  kb_key_rect(3, 7, 8, &x, &y, &w, &h);
-  if (ui_hit(e->x, e->y, x, y, w, h))
+  return 0;
+}
+
+static int kb_hit(const UiEvent *e)
+{
+
+  int r = -1, c = -1;
+  if (!kb_pick(e->x, e->y, &r, &c))
   {
+    /* 键盘上方输入预览条上的发送键 */
+    if (draft[0] && ui_hit(e->x, e->y, SCREEN_W - 62, KB_TOP - 45, 40, 36))
+    {
+      send_or_cancel();
+      return 1;
+    }
+    return 0;
+  }
+  if (r == 4)
+  {
+    switch (c)
+    {
+    case KBAR_SHIFT:
+      kb_shift = !kb_shift;
+      return 1;
+    case KBAR_SPACE:
+      if (cn_mode && py[0])
+      {
+        /* 空格 = 取第一个候选（拼音没收完就不插空格） */
+        if (cand_chars)
+        {
+          char one[8];
+          int clen = utf8_len((unsigned char)*cand_chars);
+          memcpy(one, cand_chars, (size_t)clen);
+          one[clen] = 0;
+          py_commit(one);
+        }
+        return 1;
+      }
+      draft_append(" ");
+      return 1;
+    case KBAR_HIDE:
+      kb_open = 0;
+      py_clear();
+      kb_down_row = kb_down_col = -1;
+      return 1;
+    case KBAR_SEND:
+      send_or_cancel();
+      return 1;
+    case KBAR_LANG:
+      cn_mode = !cn_mode;
+      py_clear();
+      return 1;
+    }
+    return 0;
+  }
+  if (r == 3 && c == 7)
+  { /* 退格：拼音模式下先退拼音 */
     if (cn_mode && py[0])
-    { /* 先退拼音，退完了才退正文 */
+    {
       int n = (int)strlen(py);
       py[n - 1] = 0;
       py_refresh();
@@ -758,51 +850,19 @@ static int kb_hit(const UiEvent *e)
     }
     return 1;
   }
-  /* 输入预览条上的发送按钮 */
-  if (draft[0] && ui_hit(e->x, e->y, SCREEN_W - 62, KB_TOP - 45, 40, 36))
   {
-    send_or_cancel();
-    return 1;
-  }
-  int y5 = KB_TOP + 4 * (KEY_H + KEY_GAP);
-  if (ui_hit(e->x, e->y, 18, y5, 96, KEY_H))
-  {
-    kb_shift = !kb_shift;
-    return 1;
-  }
-  if (ui_hit(e->x, e->y, 124, y5, 300, KEY_H))
-  {
-    if (cn_mode && py[0])
+    char ch = kb_rows[r][c];
+    char one[2];
+    if (cn_mode && r > 0)
     {
-      /* 空格 = 取第一个候选（拼音没收完就不插空格） */
-      if (cand_chars)
-      {
-        char one[8];
-        int clen = utf8_len((unsigned char)*cand_chars);
-        memcpy(one, cand_chars, (size_t)clen);
-        one[clen] = 0;
-        py_commit(one);
-      }
+      py_key(ch); /* 字母行进拼音 */
       return 1;
     }
-    draft_append(" ");
-    return 1;
-  }
-  if (ui_hit(e->x, e->y, 434, y5, 96, KEY_H))
-  {
-    kb_open = 0;
-    py_clear();
-    return 1;
-  }
-  if (ui_hit(e->x, e->y, 540, y5, 120, KEY_H))
-  {
-    send_or_cancel();
-    return 1;
-  }
-  if (ui_hit(e->x, e->y, 672, y5, 96, KEY_H))
-  {
-    cn_mode = !cn_mode;
-    py_clear();
+    if (!cn_mode && kb_shift && ch >= 'a' && ch <= 'z')
+      ch = (char)(ch - 'a' + 'A');
+    one[0] = ch;
+    one[1] = 0;
+    draft_append(one);
     return 1;
   }
   return 0;
@@ -814,6 +874,7 @@ int app_chat_event(const UiEvent *e)
   {
     if (e->type == UI_EV_UP)
     {
+      kb_down_row = kb_down_col = -1; /* 高亮先清掉：下面 tap 分支会提前 return */
       if (e->tap)
       {
         if (ui_topbar_back_hit(e->x, e->y))
@@ -829,6 +890,19 @@ int app_chat_event(const UiEvent *e)
         kb_hit(e);
         return 0;
       }
+    }
+    if (e->type == UI_EV_DOWN && e->y >= KB_TOP - 12)
+    {
+      /* 键盘上的按下：先记下按到的键用于高亮（动作仍在抬起时执行） */
+      kb_down_row = kb_down_col = -1;
+      kb_pick(e->x, e->y, &kb_down_row, &kb_down_col);
+      return 0;
+    }
+    if (e->type == UI_EV_MOVE && kb_down_row >= 0)
+    {
+      kb_down_row = kb_down_col = -1;
+      kb_pick(e->x, e->y, &kb_down_row, &kb_down_col);
+      return 0;
     }
     if (e->type == UI_EV_DOWN && e->y > TB_H && e->y < KB_TOP - 12)
     {
